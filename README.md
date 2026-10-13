@@ -49,3 +49,7 @@ Cause : image de base `python:3.10.0-slim` (ancienne). Trivy a bloque le build, 
 ## Limites : mesures dans un conteneur
 
 Dans un conteneur, psutil et uptime refletent en grande partie l'hote et non les limites cgroups. Pour surveiller une machine, executer l'agent sur l'hote ou lui donner acces a l'hote (`pid: host`, `/proc` en lecture seule), en acceptant les risques de securite. Sous Kubernetes : DaemonSet et metriques cgroup/cAdvisor.
+
+## Bonus : Prometheus
+
+L'API expose ses metriques au format Prometheus sur `/prometheus` (CPU, memoire, charge systeme, nombre de messages recus). Un service `prometheus` (image `prom/prometheus:v3.5.0`) les collecte toutes les 10 secondes selon `prometheus.yml`. Verification : http://localhost:9090/targets, cible en UP. Un test pytest couvre l'endpoint.
