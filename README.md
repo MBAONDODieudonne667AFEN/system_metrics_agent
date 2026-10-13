@@ -1,239 +1,51 @@
-# System Metrics Agent
+# system_metrics_agent - DevSecOps
 
-Un agent Python modulaire capable de collecter les métriques système,
-de les formater et de les transmettre en temps réel vers une API ou un
-Webhook externe.
-
-## Fonctionnalités
-
-- Collecte du pourcentage CPU.
-- Collecte de la mémoire RAM totale, utilisée et disponible.
-- Utilisation de `psutil`.
-- Utilisation de **`subprocess`** pour exécuter la commande système
-  `uptime` et récupérer la charge système.
-- Architecture modulaire :
-  - `collector.py` : collecte ;
-  - `formatter.py` : normalisation du payload ;
-  - `sender.py` : envoi HTTP ;
-  - `agent.py` : orchestration ;
-  - `api.py` : API de réception avec **FastAPI**.
-- Configuration externe avec `.env`.
-- Gestion des erreurs réseau et des erreurs de collecte.
-- Tests automatisés avec `pytest`.
+Agent Python qui collecte des metriques systeme et les envoie a une API FastAPI. Le mode d'emploi d'origine du projet est conserve dans `docs/USAGE.md`.
 
 ## Architecture
 
-```text
-system_metrics_agent/
-├── app/
-│   ├── __init__.py
-│   ├── agent.py
-│   ├── api.py
-│   ├── collector.py
-│   ├── config.py
-│   ├── formatter.py
-│   └── sender.py
-├── tests/
-│   ├── test_api.py
-│   ├── test_collector.py
-│   ├── test_formatter.py
-│   └── test_sender.py
-├── .env.example
-├── requirements.txt
-└── README.md
-```
+Fork -> Dockerfiles (api, agent) -> Docker Compose local -> GitHub Actions (tests + SonarQube -> build -> Trivy -> push Docker Hub).
 
-## Installation
+## Choix techniques
 
-Créer un environnement virtuel :
+- Image de base `python:3.12.15-slim-bookworm` (tag precis, jamais latest) : legere et compatible avec psutil, contrairement a alpine (musl).
+- Build multi-stage : pas de cache pip dans l'image finale. `requirements.txt` est copie avant le code pour reutiliser le cache de couches.
+- Utilisateur non-root (`app`), aucun secret dans l'image, `.env` exclu par `.dockerignore`.
+- uvicorn sans `--reload`, avec `--host 0.0.0.0`. HEALTHCHECK en Python (pas de curl dans slim).
+- Paquet `procps` ajoute a l'image de l'agent : il fournit la commande `uptime`.
 
-```bash
-python -m venv .venv
-```
+## Tailles d'images
 
-Linux/macOS :
+| Image | Taille sur disque | Taille compressee |
+| --- | --- | --- |
+| metrics-api | 295 MB | 69,2 MB |
+| metrics-agent | 297 MB | 69,6 MB |
 
-```bash
-source .venv/bin/activate
-```
+## Pipeline
 
-Windows :
+- Job `test` : pytest avec couverture, analyse SonarQube, Quality Gate.
+- Job `build-scan-push` (needs: test) : build sans push, scan Trivy (HIGH/CRITICAL corrigeables) avec l'image officielle `aquasec/trivy`, puis push (tags SHA + latest) uniquement sur `main`.
+- Images publiees : `mbaondo/system-metrics-api` et `mbaondo/system-metrics-agent`.
+- Secrets : `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `SONAR_TOKEN`, `SONAR_HOST_URL` (jamais dans le depot).
+- PR : https://github.com/MBAONDODieudonne667AFEN/system_metrics_agent/pull/1 (mergee sans squash).
+- Run vert sur main : https://github.com/MBAONDODieudonne667AFEN/system_metrics_agent/actions/runs/38333556293
 
-```powershell
-.venv\Scripts\Activate.ps1
-```
+## Preuve d'echec volontaire
 
-Installer les dépendances :
+Run rouge : https://github.com/MBAONDODieudonne667AFEN/system_metrics_agent/actions/runs/38342350518
 
-```bash
-pip install -r requirements.txt
-```
+Cause : image de base `python:3.10.0-slim` (ancienne). Trivy a bloque le build, et l'etape Push to Docker Hub a ete sautee alors que sa condition etait remplie. Retour au vert : run sur main ci-dessus. La branche de test n'a pas ete mergee.
 
-Créer le fichier de configuration :
+## Difficultes rencontrees
 
-```bash
-cp .env.example .env
-```
+- Identifiant Docker Hub (`mbaondo`) different de l'identifiant GitHub : connexion refusee tant que l'identifiant n'etait pas corrige.
+- Faute de frappe `httpx2` dans `requirements.txt`, corrigee en `httpx`.
+- Deux tests `get_load_average` en echec sous Windows (pas de `uptime`), verts sous Linux dans le pipeline.
+- Un workflow existant (Black, flake8) bloquait la PR : formatage du code et ajout d'un `.flake8`.
+- Tag de `trivy-action` introuvable : scan lance directement avec l'image `aquasec/trivy`.
+- Sonar ne controle pas les branches hors main : desactive sur la branche de test.
+- Le job `deploy` (VPS) du workflow `pipeline.yaml` reste rouge sur main : secrets VPS absents, hors perimetre du TP.
 
-Sous Windows, copier manuellement `.env.example` en `.env`.
+## Limites : mesures dans un conteneur
 
-## Démarrer l'API FastAPI
-
-```bash
-uvicorn app.api:app --reload
-```
-
-L'API est alors disponible sur :
-
-```text
-http://127.0.0.1:8000
-```
-
-Documentation interactive FastAPI :
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-## Démarrer l'agent
-
-Dans un deuxième terminal :
-
-```bash
-python -m app.agent
-```
-
-L'agent collecte les métriques selon l'intervalle défini dans `.env`
-puis les envoie automatiquement vers `METRICS_ENDPOINT`.
-
-## Exemple de configuration
-
-```env
-METRICS_ENDPOINT=http://127.0.0.1:8000/metrics
-COLLECTION_INTERVAL=5
-REQUEST_TIMEOUT=5
-```
-
-Pour envoyer vers un webhook externe, remplacer simplement :
-
-```env
-METRICS_ENDPOINT=https://example.com/webhook
-```
-
-## Exemple de métrique envoyée
-
-```json
-{
-  "agent": "system-metrics-agent",
-  "event_type": "system_metrics",
-  "data": {
-    "timestamp": "2026-08-27T12:00:00.000000+00:00",
-    "hostname": "server-01",
-    "cpu": {
-      "percent": 23.4,
-      "logical_cores": 8
-    },
-    "memory": {
-      "total_bytes": 16777216000,
-      "available_bytes": 8000000000,
-      "used_bytes": 7777216000,
-      "percent": 48.2
-    },
-    "system": {
-      "load_1m": 0.12,
-      "load_5m": 0.18,
-      "load_15m": 0.20
-    }
-  }
-}
-```
-
-## Endpoints
-
-### Vérifier l'état de l'API
-
-```http
-GET /health
-```
-
-Réponse :
-
-```json
-{
-  "status": "ok"
-}
-```
-
-### Envoyer des métriques
-
-```http
-POST /metrics
-```
-
-### Récupérer la dernière métrique
-
-```http
-GET /metrics/latest
-```
-
-## Tests
-
-Exécuter toute la suite :
-
-```bash
-pytest -q
-```
-
-Exécuter avec une couverture de code nécessite l'installation de
-`pytest-cov` :
-
-```bash
-pip install pytest-cov
-pytest --cov=app --cov-report=term-missing
-```
-
-## Robustesse
-
-Le projet gère notamment :
-
-- les erreurs d'exécution de `subprocess` ;
-- les timeouts ;
-- les erreurs de connexion HTTP ;
-- les réponses HTTP en erreur ;
-- les configurations invalides ;
-- les payloads incomplets ;
-- l'absence de métriques dans l'API.
-
-## Démonstration du flux
-
-```text
-┌──────────────────┐
-│ Système          │
-│ CPU / RAM        │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│ collector.py     │
-│ psutil           │
-│ subprocess       │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│ formatter.py     │
-│ Payload JSON     │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│ sender.py        │
-│ HTTP POST        │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐
-│ FastAPI          │
-│ /metrics         │
-└──────────────────┘
-```
+Dans un conteneur, psutil et uptime refletent en grande partie l'hote et non les limites cgroups. Pour surveiller une machine, executer l'agent sur l'hote ou lui donner acces a l'hote (`pid: host`, `/proc` en lecture seule), en acceptant les risques de securite. Sous Kubernetes : DaemonSet et metriques cgroup/cAdvisor.
