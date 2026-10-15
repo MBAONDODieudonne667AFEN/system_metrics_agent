@@ -39,7 +39,7 @@ Cause : image de base `python:3.10.0-slim` (ancienne). Trivy a bloque le build, 
 ## Difficultes rencontrees
 
 - Identifiant Docker Hub (`mbaondo`) different de l'identifiant GitHub : connexion refusee tant que l'identifiant n'etait pas corrige.
-- Faute de frappe `httpx2` dans `requirements.txt`, corrigee en `httpx`.
+- Paquet `httpx2` remplace par `httpx` dans `requirements.txt` (les deux fonctionnent).
 - Deux tests `get_load_average` en echec sous Windows (pas de `uptime`), verts sous Linux dans le pipeline.
 - Un workflow existant (Black, flake8) bloquait la PR : formatage du code et ajout d'un `.flake8`.
 - Tag de `trivy-action` introuvable : scan lance directement avec l'image `aquasec/trivy`.
@@ -53,3 +53,7 @@ Dans un conteneur, psutil et uptime refletent en grande partie l'hote et non les
 ## Bonus : Prometheus
 
 L'API expose ses metriques au format Prometheus sur `/prometheus` (CPU, memoire, charge systeme, nombre de messages recus). Un service `prometheus` (image `prom/prometheus:v3.5.0`) les collecte toutes les 10 secondes selon `prometheus.yml`. Verification : http://localhost:9090/targets, cible en UP. Un test pytest couvre l'endpoint.
+
+## Bonus : Prometheus
+
+L'API expose ses metriques au format Prometheus sur `/prometheus` (CPU, memoire, charge, messages recus). Un service `prometheus` (image `prom/prometheus:v3.5.0`) les collecte toutes les 10 s selon `prometheus.yml`. Verification : http://localhost:9090/targets, cible en UP.
